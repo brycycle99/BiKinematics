@@ -1,6 +1,8 @@
 #Kivy Base
-from kivy.app import App
 import os, sys
+os.environ['KIVY_METRICS_DENSITY'] = '1'
+
+from kivy.app import App
 from kivy.resources import resource_add_path, resource_find
 if hasattr(sys, '_MEIPASS'):
     resource_add_path(sys._MEIPASS)
