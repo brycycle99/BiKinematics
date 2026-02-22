@@ -39,7 +39,7 @@ from kivy.properties import NumericProperty
 from kivy.lang.builder import Builder
 from kivy.core.window import Window
 
-Builder.load_file("KivyWidgets\\mainpage.kv")
+Builder.load_file("KivyWidgets/mainpage.kv")
 
 class MainPage(FloatLayout):
     def __init__(self,**kwargs):
@@ -211,7 +211,7 @@ class MainPage(FloatLayout):
         """
         Opens a LoadDialog, with selection passed to self.load_bike_data
         """
-        content = LoadDialog(load=self.load_bike_data, cancel=self.dismiss_popup,directory = "\\SaveFiles")
+        content = LoadDialog(load=self.load_bike_data, cancel=self.dismiss_popup,directory = "/SaveFiles")
         self._popup = ThemePopup(title="Load file", content=content,
                             size_hint=(0.9, 0.9))
         self._popup.open()
@@ -293,12 +293,12 @@ class MainPage(FloatLayout):
         Saves a json at path\\filename.json, with info describing the geometry objects and constants needed to define the bike.
         """
         #Filename parsing
-        filename = filename.replace(path+"\\","") #Remove path from filename
+        filename = filename.replace(path+"/","") #Remove path from filename
         ind = filename.find('.') #Find whether there is file ext
         if ind != -1: 
             #Remove file ext if present
             filename = filename[0:ind]
-        filename = "{}\\{}.json".format(path,filename) #Put in path with .json extension
+        filename = "{}/{}.json".format(path,filename) #Put in path with .json extension
         
         #Save bike data
         save_data = self.create_bike_data(sf=1)
@@ -358,7 +358,7 @@ class MainPage(FloatLayout):
         """
         Opens a LoadDialog, with selection passed to self.load_image
         """
-        content = LoadDialog(load=self.load_image, cancel=self.dismiss_popup,directory = "\\ImageFiles")
+        content = LoadDialog(load=self.load_image, cancel=self.dismiss_popup,directory = "/ImageFiles")
         self._popup = ThemePopup(title="Load file", content=content,
                     size_hint=(0.9, 0.9))
         self._popup.open()
@@ -524,7 +524,7 @@ class MainPage(FloatLayout):
         b.save_solution_csv(sol_name,filename) #Save
 
         #Go to plotpage and view results:
-        self.parent.manager.get_screen('Plot').children[0].load_results('Results\\',filename) #Potentially the worst line of code I have written so far
+        self.parent.manager.get_screen('Plot').children[0].load_results('Results/',filename) #Potentially the worst line of code I have written so far
         self.goto_plot()
 
         self.dismiss_popup()

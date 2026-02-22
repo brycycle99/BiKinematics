@@ -1,6 +1,13 @@
-.vscode
-*__
-.env/
-*.csv
-*.ipynb*
-/Build_Windows/
+# Mac specific
+.DS_Store
+
+# Virtual Environments
+myenv/
+venv/
+ENV/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd

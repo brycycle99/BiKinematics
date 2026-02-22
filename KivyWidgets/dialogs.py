@@ -14,7 +14,7 @@ from kivy.properties import StringProperty
 #Kivy Language Tools
 from kivy.lang.builder import Builder
 
-Builder.load_file("KivyWidgets\\dialogs.kv")
+Builder.load_file("KivyWidgets/dialogs.kv")
 
 class LoadDialog(BoxLayout):
     load = ObjectProperty(None)
@@ -27,7 +27,7 @@ class SaveDialog(BoxLayout):
     save = ObjectProperty(None)
     cancel = ObjectProperty(None)
     def get_dir(self):
-        return os.getcwd()+'\\SaveFiles'
+        return os.getcwd()+'/SaveFiles'
 
 class PointDialog(BoxLayout):
     add = ObjectProperty(None)
