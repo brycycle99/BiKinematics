@@ -398,6 +398,10 @@ class MainPage(FloatLayout):
         """
         Adds Point wdiget to app, with name type and position, name,typ,pos respectively
         """
+        # Bandaid fix
+        # Hit box for point is tied to name label size, no name means no hitbox (or 1x1 px hitbox), so set name to type if no name entered
+        if not name or name.strip() == "":
+            name = typ
         #Create and add point widget
         new_point = Point(name = name,point_type = typ,pos = pos,colour_picker=self.ids['point_colour'])
         #Add circles and stuff to certain points
