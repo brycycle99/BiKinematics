@@ -49,7 +49,7 @@ class PlotPage(FloatLayout):
         self._popup.dismiss()
 
     def open_results_dialog(self):
-        content = LoadDialog(load=self.load_results, cancel=self.dismiss_popup,directory = "\\Results")
+        content = LoadDialog(load=self.load_results, cancel=self.dismiss_popup,directory = "/Results")
         self._popup = ThemePopup(title="Load results", content=content,
                             size_hint=(0.9, 0.9))
         self._popup.open()
@@ -62,7 +62,7 @@ class PlotPage(FloatLayout):
         if isinstance(filename,list):
             filename = filename[-1]
         
-        filename = filename.replace(path+"\\","") #Remove path from filename
+        filename = filename.replace(path+"/","") #Remove path from filename
 
         ind = filename.find('.') #Find whether there is file ext
         if ind != -1: 
@@ -72,7 +72,7 @@ class PlotPage(FloatLayout):
         #Set name in GUI before we add path and stuff
         self.results_filename = filename
 
-        filename = "{}\\{}.csv".format(path,filename) #Put in path with .json extension
+        filename = "{}/{}.csv".format(path,filename) #Put in path with .json extension
 
         ##Load in results
         with open(filename) as f:

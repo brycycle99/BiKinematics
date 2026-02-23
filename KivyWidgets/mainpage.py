@@ -516,23 +516,54 @@ class MainPage(FloatLayout):
         """
         Simulates geometry on screen for desired_travel (mm) - outputs results in \\Results\\filename.csv
         """
-        #Setup sim params
+        try:
+            # Setup sim params
+            desired_travel = float(desired_travel)
+            sim_data = self.create_bike_data(sf = self.px_to_mm)
+            
+            # Initialization
+            b = Bike(sim_data)
+            sol_name = 'Single_Sim'
+            
+            # Simulate steps
+            b.get_suspension_motion(desired_travel,sol_name) 
+            b.calculate_suspension_characteristics(sol_name) 
+            b.save_solution_csv(sol_name,filename) 
 
-        desired_travel = float(desired_travel)
-        sim_data = self.create_bike_data(sf = self.px_to_mm)
-        b = Bike(sim_data)
-        sol_name = 'Single_Sim'
-        #Simulate
-        b.get_suspension_motion(desired_travel,sol_name) #Base linkage movement
-        b.calculate_suspension_characteristics(sol_name) #Derived susp characteristics
-        b.save_solution_csv(sol_name,filename) #Save
+            # UI Update and Navigation
+            self.parent.manager.get_screen('Plot').children[0].load_results('Results/',filename)
+            self.goto_plot()
+            self.dismiss_popup()
+            self.info = 'Simulation: {} complete'.format(filename)
 
-        #Go to plotpage and view results:
-        self.parent.manager.get_screen('Plot').children[0].load_results('Results/',filename) #Potentially the worst line of code I have written so far
-        self.goto_plot()
+        except Exception as e:
+            # Catch the error and display it on the UI
+            import traceback
+            traceback.print_exc() # Still prints the red text in the terminal for you
+            self.info = f"Error: {str(e)}" 
+            # Note: We don't dismiss the popup so you can see the error message
 
-        self.dismiss_popup()
-        self.info = 'Simulation: {} complete'.format(filename)
+    # def simulate(self,filename,desired_travel):
+        # """
+        # Simulates geometry on screen for desired_travel (mm) - outputs results in \\Results\\filename.csv
+        # """
+        # #Setup sim params
+
+        # desired_travel = float(desired_travel)
+        # sim_data = self.create_bike_data(sf = self.px_to_mm)
+        # b = Bike(sim_data)
+        # sol_name = 'Single_Sim'
+        # #Simulate
+        # b.get_suspension_motion(desired_travel,sol_name) #Base linkage movement
+        # b.calculate_suspension_characteristics(sol_name) #Derived susp characteristics
+        # b.save_solution_csv(sol_name,filename) #Save
+
+        # #Go to plotpage and view results:
+        # self.parent.manager.get_screen('Plot').children[0].load_results('Results/',filename) #Potentially the worst line of code I have written so far
+        # self.goto_plot()
+
+        # self.dismiss_popup()
+        # self.info = 'Simulation: {} complete'.format(filename)
 
 ##Other widgets used for UI - see .kv for formatting
 #Dropdown style classes

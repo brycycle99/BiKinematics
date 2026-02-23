@@ -1,0 +1,99 @@
+{
+  "points": {
+    "bottom_bracket": {
+      "name": "bottom_bracket",
+      "type": "bottom_bracket",
+      "pos": [
+        1024.3558026407227,
+        506.32229299363064
+      ]
+    },
+    "front_wheel": {
+      "name": "front_wheel",
+      "type": "front_wheel",
+      "pos": [
+        2026.7039610840861,
+        560.3566878980893
+      ]
+    },
+    "ground": {
+      "name": "ground",
+      "type": "ground",
+      "pos": [
+        1250.4343293954134,
+        858.5464968152866
+      ]
+    },
+    "rear_wheel": {
+      "name": "rear_wheel",
+      "type": "rear_wheel",
+      "pos": [
+        466.1619179986102,
+        524.3337579617835
+      ]
+    },
+    "main": {
+      "name": "main",
+      "type": "ground",
+      "pos": [
+        1066.3703961084086,
+        612.3898089171975
+      ]
+    },
+    "linkage": {
+      "name": "linkage",
+      "type": "linkage",
+      "pos": [
+        996.3460736622654,
+        822.5235668789809
+      ]
+    }
+  },
+  "links": {
+    "Shock Eye-Eye": {
+      "name": "Shock Eye-Eye",
+      "a": "linkage",
+      "b": "ground"
+    },
+    "linkage_rear_wheel": {
+      "name": "linkage_rear_wheel",
+      "a": "linkage",
+      "b": "rear_wheel"
+    },
+    "main_linkage": {
+      "name": "main_linkage",
+      "a": "main",
+      "b": "linkage"
+    }
+  },
+  "shock": "Shock Eye-Eye",
+  "params": {
+    "wheelbase": "1200",
+    "chainring_teeth": "32",
+    "cassette_teeth": "20",
+    "wheel_size": "27.5",
+    "window_width": 2880,
+    "window_height": 1572,
+    "image_file": "/Users/robertkans/BiKinematics/ImageFiles/OrangeFive.jpg",
+    "point_colour": [
+      1,
+      1,
+      1,
+      1
+    ],
+    "link_colour": [
+      1,
+      0,
+      0,
+      1
+    ],
+    "shock_colour": [
+      0,
+      1,
+      0,
+      1
+    ],
+    "p2mm": 0.7689635824404841,
+    "cog_height": "1100"
+  }
+}
