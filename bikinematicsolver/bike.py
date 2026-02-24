@@ -1,6 +1,6 @@
 #Library imports
 import csv
-
+import networkx as nx
 from dijkstar import Graph, find_path #type: ignore
 import numpy as np #type: ignore
 
@@ -16,7 +16,6 @@ class Bike():
 
     def __init__(self, data, n_solver_steps = 100,Solver = Kinematic_Solver_Scipy_Min):
         #Input bike geo
-        print('init')
         self.points = {}
         self.links = {}
         self.shock = None
@@ -87,45 +86,141 @@ class Bike():
                     self.links[link_name] = L
 
 
+    # def find_kinematic_loop(self):
+    #     """
+    #     Finds the kinematic loop or linkage of the suspension and adds the point names (str format)
+    #     to the list self.kinemamatic_loop_points[]
+    #     Uses shortest path algorithm to find path between two points of type 'ground', along the minimum
+    #     number of links
+    #     """  
+    #     grounds = [name for name in self.points
+    #               if self.points[name].type == "front_wheel"
+    #               or self.points[name].type == "ground"]
+    #     #Create graph for shortest path 
+    #     g = Graph(undirected=True)
+    #     for name in self.points: # add nodes
+    #         g.add_node(name)
+    #     for name,link in self.links.items(): # add links
+    #         g.add_edge(link.a,link.b,1)
+    #     path = None
+    #     #Loop between grounds, and find the one connected by links. This will find the first set of grounds with a valid path
+    #     #between them. This is fine for 4 bar where there is only one set of grounds with valid path. Needs additional logic for 6-bar plus TBC
+    #     for i in range(len(grounds)):
+    #         for j in range(len(grounds)):
+    #             if i !=j and i<j:
+    #                 try:
+    #                     path = find_path(g,grounds[i],grounds[j]) #Fnd shortest path betweeen these two grounds - almost 100% sure this always gives kin. path 
+    #                     self.kinematic_loop_points  = path.nodes
+    #                 except:
+    #                     pass
+    #     #If we can't find a path we must be a single pivot. Look for path from ground -> rear wheel (single link) Could defo get some performance improvement by 
+    #     #switching the solver to a single pivot specific after this rather than the general minimisation solver.
+    #     if path is None:
+    #         rear_wheel_name = [name for name in self.points if self.points[name].type == "rear_wheel"]
+    #         for i in range(len(grounds)):
+    #             try:
+    #                 path = find_path(g,grounds[i],rear_wheel_name[0])
+    #                 self.kinematic_loop_points = path.nodes
+    #             except:
+    #                 pass
+    #     #Could maybe add a state variable of what general linkage type we have found here (single piv, 4-bar) etc
+    #     return path
+
     def find_kinematic_loop(self):
         """
-        Finds the kinematic loop or linkage of the suspension and adds the point names (str format)
-        to the list self.kinemamatic_loop_points[]
-        Uses shortest path algorithm to find path between two points of type 'ground', along the minimum
-        number of links
-        """  
-        grounds = [name for name in self.points
-                  if self.points[name].type == "front_wheel"
-                  or self.points[name].type == "ground"]
-        #Create graph for shortest path 
-        g = Graph(undirected=True)
-        for name in self.points: # add nodes
-            g.add_node(name)
-        for name,link in self.links.items(): # add links
-            g.add_edge(link.a,link.b,1)
-        path = None
-        #Loop between grounds, and find the one connected by links. This will find the first set of grounds with a valid path
-        #between them. This is fine for 4 bar where there is only one set of grounds with valid path. Needs additional logic for 6-bar plus TBC
+        Automatically detects suspension type (Single Pivot, 4-Bar, or 6-Bar+)
+        by finding independent cycles in the graph. Uses smart sorting to ensure
+        the loop driving the rear wheel is always prioritized.
+        """
+        # 1. Setup NetworkX Graph
+        G = nx.Graph()
+        for name in self.points:
+            G.add_node(name)
+        for name, link in self.links.items():
+            G.add_edge(link.a, link.b)
+
+        # 2. Add Virtual Frame Edges
+        # Connects all ground points so the graph can find complete mathematical loops
+        grounds = [n for n in self.points if self.points[n].type == "ground"]
         for i in range(len(grounds)):
-            for j in range(len(grounds)):
-                if i !=j and i<j:
-                    try:
-                        path = find_path(g,grounds[i],grounds[j]) #Fnd shortest path betweeen these two grounds - almost 100% sure this always gives kin. path 
-                        self.kinematic_loop_points  = path.nodes
-                    except:
-                        pass
-        #If we can't find a path we must be a single pivot. Look for path from ground -> rear wheel (single link) Could defo get some performance improvement by 
-        #switching the solver to a single pivot specific after this rather than the general minimisation solver.
-        if path is None:
-            rear_wheel_name = [name for name in self.points if self.points[name].type == "rear_wheel"]
-            for i in range(len(grounds)):
-                try:
-                    path = find_path(g,grounds[i],rear_wheel_name[0])
-                    self.kinematic_loop_points = path.nodes
-                except:
-                    pass
-        #Could maybe add a state variable of what general linkage type we have found here (single piv, 4-bar) etc
-        return path
+            for j in range(i + 1, len(grounds)):
+                G.add_edge(grounds[i], grounds[j], label='frame')
+
+        # 3. Find Cycle Basis (Independent Loops)
+        cycles = nx.cycle_basis(G)
+
+        # 4. Filter cycles to find REAL suspension loops
+        # A valid suspension loop must have at least one ground and one moving point
+        suspension_loops = []
+        for cycle in cycles:
+            has_ground = any(self.points[n].type == 'ground' for n in cycle)
+            has_moving = any(self.points[n].type != 'ground' for n in cycle)
+            if has_ground and has_moving:
+                suspension_loops.append(cycle)
+
+        # 5. Smart Sorting: Find which nodes the Rear Wheel anchors to
+        rw_anchors = []
+        rw_name = self.wheels['rear']
+        for name, link in self.links.items():
+            if link.a == rw_name: rw_anchors.append(link.b)
+            if link.b == rw_name: rw_anchors.append(link.a)
+
+        # Sort the loops so the one containing the Rear Wheel anchors is ALWAYS first
+        # This guarantees the main 4-bar is the primary driver loop
+        suspension_loops.sort(key=lambda loop: sum(1 for anchor in rw_anchors if anchor in loop), reverse=True)
+
+        # 6. Logic Branching by Linkage Type
+        if len(suspension_loops) == 0:
+            # SINGLE PIVOT: No cycles found, look for path to wheel
+            self.is_single_pivot = True
+            self.is_6_bar = False
+            self.kinematic_loop_points = self._find_single_pivot_path(G, grounds)
+            print("Detected: Single Pivot")
+
+        elif len(suspension_loops) == 1:
+            # 4-BAR (Without Shock Mapped): Exactly one independent loop
+            self.is_single_pivot = False
+            self.is_6_bar = False
+            self.kinematic_loop_points = suspension_loops[0]
+            print("Detected: 4-Bar")
+
+        else:
+            # We have multiple loops. Let's check if it's just a 4-bar with a shock mapped, 
+            # or a true 6-bar axle path.
+            self.is_single_pivot = False
+            
+            # The wheel-bearing loop is primary thanks to our sorting
+            self.kinematic_loop_points = suspension_loops[0] 
+            self.secondary_loop_points = suspension_loops[1] 
+
+            # If the primary wheel loop has 4 nodes (Main, Horst, SS, Rocker), it's a 4-bar.
+            if len(self.kinematic_loop_points) == 4:
+                self.is_6_bar = False # It's just a 4-bar driving a shock
+                print(f"Detected: 4-Bar with Shock Loop ({len(suspension_loops)} loops found)")
+            else:
+                self.is_6_bar = True # It's a true high-pivot 6-bar or similar
+                print(f"Detected: True 6-Bar ({len(suspension_loops)} loops found)")
+
+        return suspension_loops
+
+    def _find_single_pivot_path(self, G, grounds):
+        """
+        Helper method for Single Pivot bikes. 
+        Finds the direct shortest path from a ground point to the rear wheel.
+        """
+        rear_wheel = self.wheels['rear']
+        for gr in grounds:
+            if nx.has_path(G, gr, rear_wheel):
+                return nx.shortest_path(G, gr, rear_wheel)
+        return []
+
+    def _find_single_pivot_path(self, G, grounds):
+        # Standard fallback to find path from ground to wheel
+        rear_wheel = self.wheels['rear']
+        for gr in grounds:
+            if nx.has_path(G, gr, rear_wheel):
+                return nx.shortest_path(G, gr, rear_wheel)
+        return []
 
     def find_static_points(self):
         """
@@ -241,18 +336,57 @@ class Bike():
                 r = self.populate_static_point(sol, size, point_name)
                 sol[point_name] = r
 
-        def calculate_instant_centre(sol,size):
-            if len(self.kinematic_loop_points) < 4:
-                #If single pivot - Ic is constant at bottom bracket (will be 0th index of kin_loop list)
-                return self.populate_static_point(sol,size,self.kinematic_loop_points[0])
-            else:
-                #n-bar geometric soln -> virtual intersection of the links connected to ground
-                a1 = sol[ self.kinematic_loop_points[0] ]
-                a2 = sol[ self.kinematic_loop_points[1] ]
-                b1 = sol[ self.kinematic_loop_points[-2] ]
-                b2 = sol[ self.kinematic_loop_points[-1] ] 
+        # def calculate_instant_centre(sol,size):
+        #     if len(self.kinematic_loop_points) < 4:
+        #         #If single pivot - Ic is constant at bottom bracket (will be 0th index of kin_loop list)
+        #         return self.populate_static_point(sol,size,self.kinematic_loop_points[0])
+        #     else:
+        #         #n-bar geometric soln -> virtual intersection of the links connected to ground
+        #         a1 = sol[ self.kinematic_loop_points[0] ]
+        #         a2 = sol[ self.kinematic_loop_points[1] ]
+        #         b1 = sol[ self.kinematic_loop_points[-2] ]
+        #         b2 = sol[ self.kinematic_loop_points[-1] ] 
 
-                return g.find_intersection(a1,a2,b1,b2)
+        #         return g.find_intersection(a1,a2,b1,b2)
+        def calculate_instant_centre(self, sol, size):
+            """
+            Calculates the Instant Center of the rear axle relative to the frame.
+            Handles both 4-bar and 6-bar topologies.
+            """
+            if not self.is_6_bar:
+                # Standard 4-bar logic: Intersect Chainstay and Rocker
+                # Assumes points are ordered: [Ground1, Pivot1, Pivot2, Ground2]
+                a1 = sol[self.kinematic_loop_points[0]]
+                a2 = sol[self.kinematic_loop_points[1]]
+                b1 = sol[self.kinematic_loop_points[-2]]
+                b2 = sol[self.kinematic_loop_points[-1]]
+                return self.geometry.find_intersection(a1, a2, b1, b2)
+
+            else:
+                # 6-bar logic using Kennedy's Theorem
+                # 1. Find IC of the primary driver loop (IC_1)
+                p_loop = self.kinematic_loop_points
+                ic_driver = self.geometry.find_intersection(
+                    sol[p_loop[0]], sol[p_loop[1]], 
+                    sol[p_loop[-2]], sol[p_loop[-1]]
+                )
+
+                # 2. Find IC of the secondary loop relative to the driver (IC_2)
+                s_loop = self.secondary_loop_points
+                ic_driven = self.geometry.find_intersection(
+                    sol[s_loop[0]], sol[s_loop[1]], 
+                    sol[s_loop[-2]], sol[s_loop[-1]]
+                )
+
+                # 3. The 6-bar IC is the intersection of lines through these relative centers
+                # This typically involves projecting lines from Ground nodes through relative ICs
+                ground_node = [n for n in s_loop if self.points[n].type == 'ground'][0]
+                ic_final = self.geometry.find_intersection(
+                    sol[ground_node], ic_driven,
+                    sol[p_loop[0]], ic_driver
+                )
+                
+                return ic_final
 
         def calculate_rear_wheel_motion(sol,size):
             if self.wheels['rear'] is not None:

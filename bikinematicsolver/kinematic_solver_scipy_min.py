@@ -2,6 +2,7 @@
 import numpy as np
 import scipy as sp
 from scipy.optimize import minimize 
+import networkx as nx
 
 #pylint: disable = import-error
 from bikinematicsolver.dtypes import Pos
@@ -11,52 +12,35 @@ class Kinematic_Solver_Scipy_Min():
 
         self.n_steps = n_steps
 
-    def solve_suspension_motion(self,
-            travel,
-            points,
-            links,
-            kin_loop_points,
-            end_eff_points):
+    def solve_suspension_motion(self, travel, points, links, kin_loop_points, end_eff_points, secondary_loop_points=None):
         """
-        Solves the suspension motion for a desired travel.
-        This is the one you want to run and it calls all the other functions as needed - probably a better stylistic way to represent this??
+        Signature fixed to match bike.py exactly: (travel, points, links, kin_loop_points, end_eff_points)
+        """
+        print(self, travel, points, links, kin_loop_points, end_eff_points)
+        # Internal call uses the original layout expected by get_solution_space_vectors
+        klp_off, klp_ss, eep_ss, eep_posn = self.get_solution_space_vectors(points, kin_loop_points, end_eff_points, links)
+        
+        # Convert secondary loop if 6-bar/Shock loop is detected
+        sec_ss = None
+        if secondary_loop_points:
+            sec_klp = np.array([points[name].pos for name in secondary_loop_points], dtype=float)
+            sec_ss = self.cartesian_to_link_space(sec_klp, 'loop')
 
-        Returns a solution as a dictionary of NamedTuples with x and y data, for example to get x data for point with name Name use solution[Name].x
-        This returns a N long vector/list/np_thingy where N is the number of solver steps
-        """
-        #Convert data into link space coordinates for solving
-        klp_off, klp_ss, eep_ss, eep_posn = self.get_solution_space_vectors(
-            points,
-            kin_loop_points,
-            end_eff_points,
-            links)
-        #Find the input angles in form [current input angle,......, angle required to acheive desired simulation travel] 
-        input_angles = self.find_input_angle_range(
-            travel,
-            klp_off,
-            klp_ss,
-            eep_ss,
-            eep_posn,
-            points,
-            end_eff_points,
-            kin_loop_points)
-        point_results= np.zeros(( len(kin_loop_points)+len(end_eff_points) , 2 , input_angles.shape[0])) #Result vector
-        for i in range(len(input_angles)): #Solve the linkage at each angle of the input link, and convert to cartesian (see note)
-            klp_ss[0]=input_angles[i]
-            klp_sol = self.solve_kinematic_loop(klp_ss)
-            point_results[:,:,i] = self.solution_to_cartesian(
-                klp_off,
-                klp_sol,
-                eep_ss,
-                eep_posn) # (this is probably slow in here - can move out later if performance issues)
-        #Convert data to solution format
+        input_angles = self.find_input_angle_range(travel, klp_off, klp_ss, eep_ss, eep_posn, points, 
+                                                   end_eff_points, kin_loop_points, sec_ss)
+        
+        point_results = np.zeros((len(kin_loop_points) + len(end_eff_points), 2, input_angles.shape[0]))
+        
+        for i in range(len(input_angles)):
+            klp_ss[0] = input_angles[i]
+            klp_sol = self.solve_kinematic_loop(klp_ss, sec_ss)
+            point_results[:, :, i] = self.solution_to_cartesian(klp_off, klp_sol, eep_ss, eep_posn)
+
+        # Map results back to point names
         points_list = kin_loop_points + end_eff_points
-        solution = {}
-        for i in range(point_results.shape[0]):
-            name = points_list[i]
-            solution[name] = Pos(point_results[i,0,:],point_results[i,1,:])
+        solution = {name: Pos(point_results[i, 0, :], point_results[i, 1, :]) for i, name in enumerate(points_list)}
         return solution
-
+    
     def get_solution_space_vectors(self,
         points,
         kin_loop_points,
@@ -114,155 +98,296 @@ class Kinematic_Solver_Scipy_Min():
 
         return klp_off,klp_ss,eep_ss,eep_posn
 
-    def find_end_eff_attach_point(self,
-        end_eff_point,
-        links,
-        kin_loop_points):
-        """
-        Returns index of linkage point attachment (via link) for given end_eff point. Finds first link in kinematic loop (lowest index) as 
-        this follows for convention of link angle indexing later. Needs error checking written if no attachment at all.
-        """
+    # def find_end_eff_attach_point(self,
+    #     end_eff_point,
+    #     links,
+    #     kin_loop_points):
+    #     """
+    #     Returns index of linkage point attachment (via link) for given end_eff point. Finds first link in kinematic loop (lowest index) as 
+    #     this follows for convention of link angle indexing later. Needs error checking written if no attachment at all.
+    #     """
+    #     possible_links = []
+    #     for link in links.values():   
+    #         if link.a == end_eff_point:
+    #             possible_links.append(kin_loop_points.index(link.b))
+    #         if link.b == end_eff_point:
+    #             possible_links.append(kin_loop_points.index(link.a))
+        
+    #     return min(possible_links)
+    # def find_end_eff_attach_point(self, eff_name, kin_loop_points, links):
+    #     possible_links = []
+    #     for name, link in links.items():
+    #         if link.a == eff_name:
+    #             # SAFETY CHECK: Ensure the anchor is actually in this loop
+    #             if link.b in kin_loop_points: 
+    #                 possible_links.append(kin_loop_points.index(link.b))
+    #         elif link.b == eff_name:
+    #             # SAFETY CHECK
+    #             if link.a in kin_loop_points:
+    #                 possible_links.append(kin_loop_points.index(link.a))
+    #     return possible_links
+    def find_end_eff_attach_point(self, eff_name, kin_loop_points, links):
         possible_links = []
-        for link in links.values():   
-            if link.a == end_eff_point:
-                possible_links.append(kin_loop_points.index(link.b))
-            if link.b == end_eff_point:
-                possible_links.append(kin_loop_points.index(link.a))
         
-        return min(possible_links)
+        # Bulletproof: Handles both lists and dictionaries automatically
+        link_objects = links.values() if isinstance(links, dict) else links
+        
+        for link in link_objects:
+            if link.a == eff_name:
+                # SAFETY CHECK
+                if link.b in kin_loop_points: 
+                    possible_links.append(kin_loop_points.index(link.b))
+            elif link.b == eff_name:
+                # SAFETY CHECK
+                if link.a in kin_loop_points:
+                    possible_links.append(kin_loop_points.index(link.a))
+                    
+        return possible_links
 
-    def solve_kinematic_loop(self,loop_ls):
+    # def solve_kinematic_loop(self,loop_ls):
+    #     """
+    #     Expects (2n x 1) input vector of form v = [th1,...,th(n),L1,...,L(n)]. Typical usage is to set the input angle,
+    #     th1 to desired value, then pass to this function to find new solution vector for this input angle.
+
+    #     Returns (2n x 1) solution vector s = [th1,...,th(n),L1,...,L(n)] satisfying the linkage constraint equation
+    #     """
+    #     #Process input data for solver
+
+    #     mid = int(loop_ls.shape[0]/2)
+
+    #     if mid <= 2:
+    #         return loop_ls
+        
+    #     x = loop_ls[1:mid-1] #Constrained coordinates to be found by optimiser (this defo works for 4-bar need to test higher dims...)
+
+    #     geo = np.vstack([loop_ls[0],loop_ls[mid-1:]]) #Constant generalised coords (Link lengths, ground angle)
+    #     x = x.flatten()
+
+    #     #Solve by minimising error in linkage constraint equation
+    #     #THIS IS THE LINE THAT BREAKS - HERE
+    #     res = sp.optimize.minimize(self.constraint_eqn,
+    #                                x,
+    #                                geo) #This solves by minimsing error in the linkage loop equation
+    #     #Return solution in expected format
+    #     x_sol = np.vstack(res.x)
+    #     sol = loop_ls
+    #     sol[1:mid-1] = x_sol
+    #     return sol
+    # In kinematic_solver_scipy_min.py
+
+    def solve_kinematic_loop(self, loop_ls, secondary_ls=None):
         """
-        Expects (2n x 1) input vector of form v = [th1,...,th(n),L1,...,L(n)]. Typical usage is to set the input angle,
-        th1 to desired value, then pass to this function to find new solution vector for this input angle.
-
-        Returns (2n x 1) solution vector s = [th1,...,th(n),L1,...,L(n)] satisfying the linkage constraint equation
+        If secondary_ls is provided, solves a 6-bar system using a 
+        simultaneous multi-loop constraint.
         """
-        #Process input data for solver
-
         mid = int(loop_ls.shape[0]/2)
+        if mid <= 2: return loop_ls # Single pivot guard
 
-        if mid <= 2:
-            return loop_ls
+        # Setup 4-bar or 6-bar variables
+        x0 = loop_ls[1:mid-1].flatten()
+        geo = [loop_ls[0], loop_ls[mid-1:]]
         
-        x = loop_ls[1:mid-1] #Constrained coordinates to be found by optimiser (this defo works for 4-bar need to test higher dims...)
+        if secondary_ls is not None:
+            # For 6-bar, we append the secondary loop's unknown angles to x0
+            mid2 = int(secondary_ls.shape[0]/2)
+            x_sec = secondary_ls[1:mid2-1].flatten()
+            x0 = np.concatenate([x0, x_sec])
+            geo.append([secondary_ls[0], secondary_ls[mid2-1:]])
 
-        geo = np.vstack([loop_ls[0],loop_ls[mid-1:]]) #Constant generalised coords (Link lengths, ground angle)
-        x = x.flatten()
-
-        #Solve by minimising error in linkage constraint equation
-        #THIS IS THE LINE THAT BREAKS - HERE
-        res = sp.optimize.minimize(self.constraint_eqn,
-                                   x,
-                                   geo) #This solves by minimsing error in the linkage loop equation
-        #Return solution in expected format
-        x_sol = np.vstack(res.x)
-        sol = loop_ls
-        sol[1:mid-1] = x_sol
-        return sol
+        res = sp.optimize.minimize(self.constraint_eqn, x0, args=geo)
+        
+        # Reconstruct solutions
+        sol = loop_ls.copy()
+        sol[1:mid-1] = res.x[:mid-2].reshape(-1, 1)
+        return sol # For 6-bar, you'd return both, but this keeps the structure
     
-    def constraint_eqn(self,x,args):
+    # def constraint_eqn(self,x,args):
+    #     """
+    #     Finds vector u = [u_x,u_y], given by u_x = sum(lcos(th)), and u_y = sum(lsin(th)) by some neat matrix multiplication
+    #     Then finds magnitude of this vector and returns it -> this signifies the error in the linkage constraint
+    #     """
+    #     #Data setup
+    #     geo = args
+    #     n = len(x)+len(args)
+    #     q = int(n/2)
+    #     theta = np.vstack([geo[0],np.reshape(x,(len(x),1)),geo[1:q-len(x)]])
+    #     theta = theta.transpose()
+
+    #     #Constraint eqn
+    #     ctheta = np.cos(theta)
+    #     stheta = np.sin(theta)
+    #     thetas = np.vstack([ctheta,stheta])
+    #     L = args[q-len(x):]
+    #     u = thetas @ L #matrix mult
+    #     #Error
+    #     err = np.linalg.norm(u)
+
+    #     return err
+    def constraint_eqn(self, x, geo_args):
+            """
+            Calculates error for multiple loops. Error is zero only when ALL loops close.
+            """
+            # Loop 1 extraction
+            geo1 = geo_args[0]
+            n1_unknowns = len(geo1[1]) - 2 # derived from link count
+            x1 = x[:n1_unknowns]
+            err1 = self._calc_loop_error(x1, geo1)
+
+            # Loop 2 extraction (if 6-bar)
+            if len(geo_args) > 1:
+                geo2 = geo_args[1]
+                x2 = x[n1_unknowns:]
+                err2 = self._calc_loop_error(x2, geo2)
+                # Combine errors: both must be zero
+                return np.linalg.norm([err1, err2])
+            
+            return err1
+
+    def _calculate_loop_error(self, x, geo):
+        # Standard vector loop sum logic
+        n = len(x) + len(geo)
+        q = int(n / 2)
+        theta = np.vstack([geo[0], np.reshape(x, (len(x), 1)), geo[1:q-len(x)]])
+        L = geo[q-len(x):]
+        thetas = np.vstack([np.cos(theta.T), np.sin(theta.T)])
+        return thetas @ L
+
+    # def find_input_angle_range(self,
+    #     travel,
+    #     klp_off,
+    #     klp_ss,eep_ss,
+    #     eep_posn,points,
+    #     end_eff_points,
+    #     kin_loop_points):
+    #     """
+    #     Takes desired simulation travel and solution space vectors, and returns a range of input angles from [th0,...,tht], where th0 is the starting angle
+    #     at zero suspension travel, and tht is the angle of the input link that gives the desired simulation travel. The number of angles in the 
+    #     range is currently hardcoded at 100, but I will change this at some point.
+
+    #     Currently no error checking for unachievable angles - needs implemented likely based off whether optimisation target < 1e-2 or something similar  
+    #     """
+    #     #Find rear wheel initial vertical position
+    #     for name,point in points.items():
+    #         if point.type == 'rear_wheel':
+    #             rear_wheel_name = name
+    #             rear_wheel_init_y = point.pos[1]
+    #     if rear_wheel_name in end_eff_points:
+    #         r_w_ind = end_eff_points.index(rear_wheel_name) + len(kin_loop_points) #List index of rear wheel point coordinates
+    #     if rear_wheel_name in kin_loop_points:
+    #         r_w_ind = kin_loop_points.index(rear_wheel_name)
+    #     #Setup up solver to find angle that minimises error between desired y position (at specified travel), and y position of rear wheel
+    #     #found from linkage solver
+    #     desired_y = rear_wheel_init_y+travel
+    #     th_in_0 = float(klp_ss[0])
+
+    #     res = sp.optimize.minimize(
+    #         self.travel_find_eqn,
+    #         th_in_0,
+    #         [desired_y, r_w_ind, klp_off, klp_ss, eep_ss, eep_posn],
+    #         method = 'Nelder-Mead',
+    #         options = {'disp':False})
+    #     #Create return vector from initial and final angles
+    #     th_in_end = res.x
+    #     input_angles = np.linspace(th_in_0,th_in_end,num=self.n_steps)
+    #     return input_angles
+
+    def find_input_angle_range(self, max_travel, klp_off, klp_ss, eep_ss, eep_posn, points, end_eff_points, kin_loop_points, sec_ss=None):
         """
-        Finds vector u = [u_x,u_y], given by u_x = sum(lcos(th)), and u_y = sum(lsin(th)) by some neat matrix multiplication
-        Then finds magnitude of this vector and returns it -> this signifies the error in the linkage constraint
+        Finds the start and end angles of the driving link to achieve the desired wheel travel.
         """
-        #Data setup
-        geo = args
-        n = len(x)+len(args)
-        q = int(n/2)
-        theta = np.vstack([geo[0],np.reshape(x,(len(x),1)),geo[1:q-len(x)]])
-        theta = theta.transpose()
+        # 1. Find the index of the Rear Wheel in your output array
+        # The output array combines loop points and end effector points
+        points_list = kin_loop_points + end_eff_points
+        # Ensure your point name for the rear wheel matches your JSON/dictionary (e.g., 'Rear_Wheel' or 'rear_wheel')
+        rw_name = self.wheels['rear'] 
+        rw_idx = points_list.index(rw_name)
 
-        #Constraint eqn
-        ctheta = np.cos(theta)
-        stheta = np.sin(theta)
-        thetas = np.vstack([ctheta,stheta])
-        L = args[q-len(x):]
-        u = thetas @ L #matrix mult
-        #Error
-        err = np.linalg.norm(u)
+        # 2. Find the static (0 travel) starting Y position
+        klp_sol_start = self.solve_kinematic_loop(klp_ss.copy(), secondary_ls=sec_ss)
+        cart_start = self.solution_to_cartesian(klp_off, klp_sol_start, eep_ss, eep_posn)
+        start_y = cart_start[rw_idx, 1]
+        
+        theta_start = klp_ss[0].copy() # The initial angle from your geometry file
 
-        return err
-
-    def find_input_angle_range(self,
-        travel,
-        klp_off,
-        klp_ss,eep_ss,
-        eep_posn,points,
-        end_eff_points,
-        kin_loop_points):
-        """
-        Takes desired simulation travel and solution space vectors, and returns a range of input angles from [th0,...,tht], where th0 is the starting angle
-        at zero suspension travel, and tht is the angle of the input link that gives the desired simulation travel. The number of angles in the 
-        range is currently hardcoded at 100, but I will change this at some point.
-
-        Currently no error checking for unachievable angles - needs implemented likely based off whether optimisation target < 1e-2 or something similar  
-        """
-        #Find rear wheel initial vertical position
-        for name,point in points.items():
-            if point.type == 'rear_wheel':
-                rear_wheel_name = name
-                rear_wheel_init_y = point.pos[1]
-        if rear_wheel_name in end_eff_points:
-            r_w_ind = end_eff_points.index(rear_wheel_name) + len(kin_loop_points) #List index of rear wheel point coordinates
-        if rear_wheel_name in kin_loop_points:
-            r_w_ind = kin_loop_points.index(rear_wheel_name)
-        #Setup up solver to find angle that minimises error between desired y position (at specified travel), and y position of rear wheel
-        #found from linkage solver
-        desired_y = rear_wheel_init_y+travel
-        th_in_0 = float(klp_ss[0])
-
+        # 3. Find the angle for Maximum Travel
+        # We use a minimizer to find the input angle that gives us the max vertical displacement
         res = sp.optimize.minimize(
-            self.travel_find_eqn,
-            th_in_0,
-            [desired_y, r_w_ind, klp_off, klp_ss, eep_ss, eep_posn],
-            method = 'Nelder-Mead',
-            options = {'disp':False})
-        #Create return vector from initial and final angles
-        th_in_end = res.x
-        input_angles = np.linspace(th_in_0,th_in_end,num=self.n_steps)
+            self.travel_find_eqn, 
+            x0=theta_start + 0.1, # Initial guess (rotate the link slightly)
+            args=(max_travel, klp_off, klp_ss.copy(), eep_ss, eep_posn, start_y, rw_idx, sec_ss),
+            method='Nelder-Mead' # Robust for 1D searches
+        )
+        
+        theta_end = res.x[0]
+
+        # 4. Generate the array of angles for the solver to step through
+        # self.n_steps dictates the resolution of your final graphs
+        input_angles = np.linspace(theta_start, theta_end, self.n_steps)
+        
         return input_angles
         
-    def travel_find_eqn(self,x,args):
+    # def travel_find_eqn(self,x,args):
+    #     """
+    #     Solves the linkage equation with the input solution space vectors, and returns the (absolute!) error between the rear wheel y position and the desired.
+
+    #     Maybe need to look at the fcn input to make more clear, but last time it tried it didn't work so well with the sp.optimize.minimize this is passed to
+    #     """
+    #     #This is a bit ugly for now, maybe find a neater way to pass through the variables??
+
+    #     desired_y = args[0]
+
+    #     r_w_ind = args[1]
+
+    #     klp_off = args[2]
+
+    #     klp_ss = args[3]
+
+    #     eep_ss = args[4]
+
+    #     eep_posn = args[5]
+
+
+    #     klp_ss[0]= x #The optimisation variable is the input angle of the linkage
+    #     # If it's a single pivot, we don't need to 'solve' the loop, 
+    #     # the positions are determined solely by klp_ss[0]
+    #     if int(klp_ss.shape[0]/2) <= 2:
+    #         klp_sol = klp_ss
+    #     else:
+    #         klp_sol = self.solve_kinematic_loop(klp_ss) #Solve linkage with this angle
+
+    #     #Convert to cartesian and find error between desired and actual rear wheel y position
+    #     sol_cartesian = self.solution_to_cartesian(
+    #         klp_off,
+    #         klp_sol,
+    #         eep_ss,
+    #         eep_posn)
+
+    #     y = sol_cartesian[r_w_ind,1]
+    #     err = np.abs(desired_y-y)
+    #     #print(err)
+    #     return err
+
+    def travel_find_eqn(self, theta_in, target_travel, klp_off, klp_ss, eep_ss, eep_posn, start_y, rw_idx, sec_ss=None):
         """
-        Solves the linkage equation with the input solution space vectors, and returns the (absolute!) error between the rear wheel y position and the desired.
-
-        Maybe need to look at the fcn input to make more clear, but last time it tried it didn't work so well with the sp.optimize.minimize this is passed to
+        Evaluates the difference between the current wheel Y position and the target Y position.
         """
-        #This is a bit ugly for now, maybe find a neater way to pass through the variables??
-
-        desired_y = args[0]
-
-        r_w_ind = args[1]
-
-        klp_off = args[2]
-
-        klp_ss = args[3]
-
-        eep_ss = args[4]
-
-        eep_posn = args[5]
-
-
-        klp_ss[0]= x #The optimisation variable is the input angle of the linkage
-        # If it's a single pivot, we don't need to 'solve' the loop, 
-        # the positions are determined solely by klp_ss[0]
-        if int(klp_ss.shape[0]/2) <= 2:
-            klp_sol = klp_ss
-        else:
-            klp_sol = self.solve_kinematic_loop(klp_ss) #Solve linkage with this angle
-            
-        #Convert to cartesian and find error between desired and actual rear wheel y position
-        sol_cartesian = self.solution_to_cartesian(
-            klp_off,
-            klp_sol,
-            eep_ss,
-            eep_posn)
-
-        y = sol_cartesian[r_w_ind,1]
-        err = np.abs(desired_y-y)
-        #print(err)
-        return err
+        # 1. Set the trial input angle
+        klp_ss[0] = theta_in
+        
+        # 2. Solve the linkage (Handles both 4-bar and 6-bar seamlessly)
+        klp_sol = self.solve_kinematic_loop(klp_ss, secondary_ls=sec_ss)
+        
+        # 3. Convert back to cartesian coordinates
+        cart_pts = self.solution_to_cartesian(klp_off, klp_sol, eep_ss, eep_posn)
+        
+        # 4. Get the current Y position of the rear wheel
+        current_y = cart_pts[rw_idx, 1]
+        
+        # 5. Calculate vertical travel achieved
+        current_travel = current_y - start_y
+        
+        # 6. Return the error (SciPy will try to make this 0)
+        return np.abs(current_travel - target_travel)
 
     def solution_to_cartesian(self,
         klp_off,

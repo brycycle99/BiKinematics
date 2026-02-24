@@ -1,24 +1,56 @@
 import numpy as np #type: ignore
 from bikinematicsolver.dtypes import Pos  
 
-def find_intersection(a1,a2,b1,b2):
-    """
-    Finds intersection of lines a and b, described by points a1,a2,b1,b2
-    Accepts vector input of shape (2,N)
-    Returns (x_int,y_int)
-    """
-    #Eqn first line
-    m_a = np.subtract( a2.y , a1.y ) / np.subtract( a2.x , a1.x ) 
-    c_a = np.subtract( a1.y,  m_a * a1.x ) 
-    #Eqn second line
-    m_b = np.subtract( b2.y , b1.y ) / np.subtract( b2.x , b1.x ) 
-    c_b = np.subtract( b1.y, m_b * b1.x )
-    #Intersction point
-    x0 = np.subtract( c_b , c_a ) / np.subtract( m_a, m_b )
-    y0 = np.add( m_b * x0  , c_b ) 
+# def find_intersection(a1,a2,b1,b2):
+#     """
+#     Finds intersection of lines a and b, described by points a1,a2,b1,b2
+#     Accepts vector input of shape (2,N)
+#     Returns (x_int,y_int)
+#     """
+#     #Eqn first line
+#     m_a = np.subtract( a2.y , a1.y ) / np.subtract( a2.x , a1.x ) 
+#     c_a = np.subtract( a1.y,  m_a * a1.x ) 
+#     #Eqn second line
+#     m_b = np.subtract( b2.y , b1.y ) / np.subtract( b2.x , b1.x ) 
+#     c_b = np.subtract( b1.y, m_b * b1.x )
+#     #Intersction point
+#     x0 = np.subtract( c_b , c_a ) / np.subtract( m_a, m_b )
+#     y0 = np.add( m_b * x0  , c_b ) 
 
-    ic = Pos(x0,y0)      
-    return ic
+#     ic = Pos(x0,y0)      
+#     return ic
+def find_intersection(a1, a2, b1, b2):
+    """
+    Determinant-based intersection. Robust for vertical and parallel lines.
+    """
+    # Differences
+    dx_a = a1.x - a2.x
+    dy_a = a1.y - a2.y
+    dx_b = b1.x - b2.x
+    dy_b = b1.y - b2.y
+
+    # Determinant of the slopes
+    div = dx_a * dy_b - dy_a * dx_b
+
+    # Check for parallel lines (div is near zero)
+    # We use a small epsilon to handle float precision
+    is_parallel = np.abs(div) < 1e-9
+
+    # Calculate intersection using determinants
+    d_a = a1.x * a2.y - a1.y * a2.x
+    d_b = b1.x * b2.y - b1.y * b2.x
+    
+    x0 = (d_a * dx_b - dx_a * d_b) / div
+    y0 = (d_a * dy_b - dy_a * d_b) / div
+
+    # If parallel, the IC is at infinity. 
+    # Returning large values prevents the solver from crashing
+    if np.any(is_parallel):
+        # You can handle array inputs by using np.where
+        x0 = np.where(is_parallel, 1e12, x0)
+        y0 = np.where(is_parallel, 1e12, y0)
+
+    return Pos(x0, y0)
 
 def tangent_eqn(cen,r1,r2):
     """
