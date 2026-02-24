@@ -142,6 +142,9 @@ class Kinematic_Solver_Scipy_Min():
 
         mid = int(loop_ls.shape[0]/2)
 
+        if mid <= 2:
+            return loop_ls
+        
         x = loop_ls[1:mid-1] #Constrained coordinates to be found by optimiser (this defo works for 4-bar need to test higher dims...)
 
         geo = np.vstack([loop_ls[0],loop_ls[mid-1:]]) #Constant generalised coords (Link lengths, ground angle)
@@ -242,8 +245,13 @@ class Kinematic_Solver_Scipy_Min():
 
 
         klp_ss[0]= x #The optimisation variable is the input angle of the linkage
-
-        klp_sol = self.solve_kinematic_loop(klp_ss) #Solve linkage with this angle
+        # If it's a single pivot, we don't need to 'solve' the loop, 
+        # the positions are determined solely by klp_ss[0]
+        if int(klp_ss.shape[0]/2) <= 2:
+            klp_sol = klp_ss
+        else:
+            klp_sol = self.solve_kinematic_loop(klp_ss) #Solve linkage with this angle
+            
         #Convert to cartesian and find error between desired and actual rear wheel y position
         sol_cartesian = self.solution_to_cartesian(
             klp_off,

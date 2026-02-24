@@ -16,6 +16,7 @@ class Bike():
 
     def __init__(self, data, n_solver_steps = 100,Solver = Kinematic_Solver_Scipy_Min):
         #Input bike geo
+        print('init')
         self.points = {}
         self.links = {}
         self.shock = None
@@ -96,7 +97,6 @@ class Bike():
         grounds = [name for name in self.points
                   if self.points[name].type == "front_wheel"
                   or self.points[name].type == "ground"]
-
         #Create graph for shortest path 
         g = Graph(undirected=True)
         for name in self.points: # add nodes
@@ -116,7 +116,6 @@ class Bike():
                         pass
         #If we can't find a path we must be a single pivot. Look for path from ground -> rear wheel (single link) Could defo get some performance improvement by 
         #switching the solver to a single pivot specific after this rather than the general minimisation solver.
-        
         if path is None:
             rear_wheel_name = [name for name in self.points if self.points[name].type == "rear_wheel"]
             for i in range(len(grounds)):
