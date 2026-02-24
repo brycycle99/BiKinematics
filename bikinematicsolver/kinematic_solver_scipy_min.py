@@ -12,15 +12,11 @@ class Kinematic_Solver_Scipy_Min():
 
         self.n_steps = n_steps
 
-    def solve_suspension_motion(self, travel, points, links, kin_loop_points, end_eff_points, secondary_loop_points=None):
-        """
-        Signature fixed to match bike.py exactly: (travel, points, links, kin_loop_points, end_eff_points)
-        """
-        print(self, travel, points, links, kin_loop_points, end_eff_points)
-        # Internal call uses the original layout expected by get_solution_space_vectors
+    def solve_suspension_motion(self, travel, points, links, kin_loop_points, end_eff_points, secondary_loop_points=None): 
+
         klp_off, klp_ss, eep_ss, eep_posn = self.get_solution_space_vectors(points, kin_loop_points, end_eff_points, links)
         
-        # Convert secondary loop if 6-bar/Shock loop is detected
+        # Convert secondary loop if 6-bar is detected
         sec_ss = None
         if secondary_loop_points:
             sec_klp = np.array([points[name].pos for name in secondary_loop_points], dtype=float)
@@ -82,12 +78,31 @@ class Kinematic_Solver_Scipy_Min():
         eep_ss =np.zeros(eep.shape[0]*2) # Converting (n x 2) [[x1,y1]...[xn,yn]] shape to [th1...thn,L1...Ln] (2n x 1) shape
 
         for end_eff_index in range(len(end_eff_points)): #Loop through end eff points and find attachment point and offset            
-            #Find attach point
-            attach_point_index = self.find_end_eff_attach_point(
+            
+        # 1. Get the LIST of attachment points
+            attach_point_list = self.find_end_eff_attach_point(
                 end_eff_points[end_eff_index],
                 links,
                 kin_loop_points)
-            #Find offset from attach point to end effector
+                
+            # 2. THE FIX: Intelligently pick the correct base point of the physical link!
+            if len(attach_point_list) == 2:
+                u = attach_point_list[0]
+                v = attach_point_list[1]
+                n_loop = len(kin_loop_points)
+                
+                # Check which point connects to the other in the correct loop sequence
+                if (u + 1) % n_loop == v:
+                    attach_point_index = u
+                elif (v + 1) % n_loop == u:
+                    attach_point_index = v
+                else:
+                    attach_point_index = attach_point_list[0] # Fallback
+            else:
+                attach_point_index = attach_point_list[0] # Faux-bars / single pivot fallback       
+            
+            # 3. Find offset from attach point to end effector
+            # Because attach_point_index is now an integer, this array stays perfectly flat
             Th,L = self.cartesian_to_link_space([klp[attach_point_index],eep[end_eff_index]])
             Th = klp_ss[attach_point_index] - Th #Find constant offset from link, orignal Th was theta from global x and non-constant!!!!!
 
@@ -126,19 +141,24 @@ class Kinematic_Solver_Scipy_Min():
     #             if link.a in kin_loop_points:
     #                 possible_links.append(kin_loop_points.index(link.a))
     #     return possible_links
-    def find_end_eff_attach_point(self, eff_name, kin_loop_points, links):
+    def find_end_eff_attach_point(self, eff_name, arg1, arg2):
+        # Auto-detect which argument is the dictionary of links
+        if isinstance(arg1, dict) or (isinstance(arg1, list) and len(arg1) > 0 and hasattr(arg1[0], 'a')):
+            links_data = arg1
+            kin_loop_points = arg2
+        else:
+            links_data = arg2
+            kin_loop_points = arg1
+
         possible_links = []
-        
-        # Bulletproof: Handles both lists and dictionaries automatically
-        link_objects = links.values() if isinstance(links, dict) else links
+        # Safely extract the link objects
+        link_objects = links_data.values() if isinstance(links_data, dict) else links_data
         
         for link in link_objects:
             if link.a == eff_name:
-                # SAFETY CHECK
                 if link.b in kin_loop_points: 
                     possible_links.append(kin_loop_points.index(link.b))
             elif link.b == eff_name:
-                # SAFETY CHECK
                 if link.a in kin_loop_points:
                     possible_links.append(kin_loop_points.index(link.a))
                     
@@ -177,29 +197,32 @@ class Kinematic_Solver_Scipy_Min():
 
     def solve_kinematic_loop(self, loop_ls, secondary_ls=None):
         """
-        If secondary_ls is provided, solves a 6-bar system using a 
-        simultaneous multi-loop constraint.
+        Handles Single Pivot, 4-Bar, and 6-Bar simultaneous minimization.
         """
-        mid = int(loop_ls.shape[0]/2)
-        if mid <= 2: return loop_ls # Single pivot guard
+        mid = int(loop_ls.shape[0] / 2)
+        if mid <= 2: # Single Pivot bypass
+            return loop_ls
 
-        # Setup 4-bar or 6-bar variables
+        # Partition variables for Loop 1
         x0 = loop_ls[1:mid-1].flatten()
-        geo = [loop_ls[0], loop_ls[mid-1:]]
         
+        # THE FIX: Properly separate start angle, end (frame) angle, and lengths
+        geo = [ [loop_ls[0], loop_ls[mid-1], loop_ls[mid:]] ] 
+        
+        # Add variables for Loop 2 if 6-bar/Shock Loop is present
         if secondary_ls is not None:
-            # For 6-bar, we append the secondary loop's unknown angles to x0
-            mid2 = int(secondary_ls.shape[0]/2)
+            mid2 = int(secondary_ls.shape[0] / 2)
             x_sec = secondary_ls[1:mid2-1].flatten()
             x0 = np.concatenate([x0, x_sec])
-            geo.append([secondary_ls[0], secondary_ls[mid2-1:]])
+            geo.append([secondary_ls[0], secondary_ls[mid2-1], secondary_ls[mid2:]])
 
-        res = sp.optimize.minimize(self.constraint_eqn, x0, args=geo)
+        # Simultaneous minimization of all loop constraints
+        res = sp.optimize.minimize(self.constraint_eqn, x0, args=(geo,))
         
-        # Reconstruct solutions
+        # Reconstruct the primary loop solution
         sol = loop_ls.copy()
         sol[1:mid-1] = res.x[:mid-2].reshape(-1, 1)
-        return sol # For 6-bar, you'd return both, but this keeps the structure
+        return sol
     
     # def constraint_eqn(self,x,args):
     #     """
@@ -224,34 +247,46 @@ class Kinematic_Solver_Scipy_Min():
 
     #     return err
     def constraint_eqn(self, x, geo_args):
-            """
-            Calculates error for multiple loops. Error is zero only when ALL loops close.
-            """
-            # Loop 1 extraction
-            geo1 = geo_args[0]
-            n1_unknowns = len(geo1[1]) - 2 # derived from link count
-            x1 = x[:n1_unknowns]
-            err1 = self._calc_loop_error(x1, geo1)
+        """
+        Calculates error for multiple loops. Error is zero only when ALL loops close.
+        """
+        # Loop 1 extraction
+        geo1 = geo_args[0]
+        lengths1 = geo1[2] # THE FIX: Look at index 2 for the lengths array
+        n1_unknowns = len(lengths1) - 2 # derived from link count
+        x1 = x[:n1_unknowns]
+        err1 = self._calc_loop_error(x1, geo1)
 
-            # Loop 2 extraction (if 6-bar)
-            if len(geo_args) > 1:
-                geo2 = geo_args[1]
-                x2 = x[n1_unknowns:]
-                err2 = self._calc_loop_error(x2, geo2)
-                # Combine errors: both must be zero
-                return np.linalg.norm([err1, err2])
-            
-            return err1
+        # Loop 2 extraction (if 6-bar)
+        if len(geo_args) > 1:
+            geo2 = geo_args[1]
+            lengths2 = geo2[2] # THE FIX: Look at index 2
+            n2_unknowns = len(lengths2) - 2
+            x2 = x[n1_unknowns : n1_unknowns + n2_unknowns]
+            err2 = self._calc_loop_error(x2, geo2)
+            # Combine errors: both must be zero
+            return np.linalg.norm([err1, err2])
+        
+        return err1
 
-    def _calculate_loop_error(self, x, geo):
-        # Standard vector loop sum logic
-        n = len(x) + len(geo)
-        q = int(n / 2)
-        theta = np.vstack([geo[0], np.reshape(x, (len(x), 1)), geo[1:q-len(x)]])
-        L = geo[q-len(x):]
-        thetas = np.vstack([np.cos(theta.T), np.sin(theta.T)])
-        return thetas @ L
-
+    def _calc_loop_error(self, x_angles, geo):
+        """
+        Helper function to calculate the tip-to-tail vector sum error.
+        Calculates how far the loop is from closing physically.
+        """
+        start_angle = geo[0]
+        end_angle = geo[1]
+        lengths = geo[2]
+        
+        # THE FIX: Rebuild full theta vector using the true frame angle, not [0]
+        theta = np.vstack([start_angle, np.reshape(x_angles, (-1, 1)), end_angle]) 
+        
+        # Standard vector loop closure: calculate X and Y components
+        u_x = np.sum(lengths.flatten() * np.cos(theta.flatten()))
+        u_y = np.sum(lengths.flatten() * np.sin(theta.flatten()))
+        
+        # Return the hypotenuse (the absolute distance error) as a single scalar
+        return np.sqrt(u_x**2 + u_y**2)
     # def find_input_angle_range(self,
     #     travel,
     #     klp_off,
@@ -296,10 +331,19 @@ class Kinematic_Solver_Scipy_Min():
         Finds the start and end angles of the driving link to achieve the desired wheel travel.
         """
         # 1. Find the index of the Rear Wheel in your output array
-        # The output array combines loop points and end effector points
         points_list = kin_loop_points + end_eff_points
-        # Ensure your point name for the rear wheel matches your JSON/dictionary (e.g., 'Rear_Wheel' or 'rear_wheel')
-        rw_name = self.wheels['rear'] 
+        
+        # Safely find the rear wheel name by inspecting the points dictionary
+        rw_name = None
+        for name, pt in points.items():
+            if pt.type == 'rear_wheel':
+                rw_name = name
+                break
+                
+        # Fallback just in case the JSON type is missing
+        if rw_name is None:
+            rw_name = 'Rear_Wheel'
+            
         rw_idx = points_list.index(rw_name)
 
         # 2. Find the static (0 travel) starting Y position
@@ -321,7 +365,6 @@ class Kinematic_Solver_Scipy_Min():
         theta_end = res.x[0]
 
         # 4. Generate the array of angles for the solver to step through
-        # self.n_steps dictates the resolution of your final graphs
         input_angles = np.linspace(theta_start, theta_end, self.n_steps)
         
         return input_angles

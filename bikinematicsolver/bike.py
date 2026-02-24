@@ -178,11 +178,19 @@ class Bike():
             print("Detected: Single Pivot")
 
         elif len(suspension_loops) == 1:
-            # 4-BAR (Without Shock Mapped): Exactly one independent loop
-            self.is_single_pivot = False
-            self.is_6_bar = False
-            self.kinematic_loop_points = suspension_loops[0]
-            print("Detected: 4-Bar")
+            # We found one loop. Let's check if it's a rigid triangle or a true 4-bar.
+            if len(suspension_loops[0]) <= 3:
+                # A 3-node loop is a rigid triangle (e.g. a bulky Single Pivot swingarm)
+                self.is_single_pivot = True
+                self.is_6_bar = False
+                self.kinematic_loop_points = self._find_single_pivot_path(G, grounds)
+                print("Detected: Single Pivot (Rigid Triangle Swingarm)")
+            else:
+                # A 4-node loop is a true 4-Bar linkage
+                self.is_single_pivot = False
+                self.is_6_bar = False
+                self.kinematic_loop_points = suspension_loops[0]
+                print("Detected: 4-Bar")
 
         else:
             # We have multiple loops. Let's check if it's just a 4-bar with a shock mapped, 
@@ -292,6 +300,17 @@ class Bike():
  
     ##-- Solution functions
     def get_suspension_motion(self, travel, name):
+        # THE NEW FIX: Intelligently reorder the loop so a frame pivot is the driver!
+        # We look for a ground point that connects to a moving linkage.
+        for i in range(len(self.kinematic_loop_points)):
+            pt1 = self.points[self.kinematic_loop_points[i]]
+            pt2 = self.points[self.kinematic_loop_points[(i + 1) % len(self.kinematic_loop_points)]]
+            
+            if pt1.type == 'ground' and pt2.type != 'ground':
+                # We found the perfect starting pivot! Rotate the list so it starts here.
+                self.kinematic_loop_points = self.kinematic_loop_points[i:] + self.kinematic_loop_points[:i]
+                break
+
         try:
             # This is the call that triggers the solver
             sol = self.kinematic_solver.solve_suspension_motion(
@@ -348,40 +367,42 @@ class Bike():
         #         b2 = sol[ self.kinematic_loop_points[-1] ] 
 
         #         return g.find_intersection(a1,a2,b1,b2)
-        def calculate_instant_centre(self, sol, size):
+        def calculate_instant_centre(sol):
             """
             Calculates the Instant Center of the rear axle relative to the frame.
-            Handles both 4-bar and 6-bar topologies.
+            Handles Single Pivot, 4-bar, and 6-bar topologies.
             """
-            if not self.is_6_bar:
-                # Standard 4-bar logic: Intersect Chainstay and Rocker
-                # Assumes points are ordered: [Ground1, Pivot1, Pivot2, Ground2]
+            # 1. THE NEW FIX: Explicitly handle single pivot ICs
+            if getattr(self, 'is_single_pivot', False):
+                # The IC is permanently fixed at the Main Pivot (the ground node)
+                ground_node = [n for n in self.kinematic_loop_points if self.points[n].type == 'ground'][0]
+                return sol[ground_node]
+
+            # 2. Standard 4-bar logic
+            elif not self.is_6_bar:
                 a1 = sol[self.kinematic_loop_points[0]]
                 a2 = sol[self.kinematic_loop_points[1]]
                 b1 = sol[self.kinematic_loop_points[-2]]
                 b2 = sol[self.kinematic_loop_points[-1]]
-                return self.geometry.find_intersection(a1, a2, b1, b2)
+                
+                return g.find_intersection(a1, a2, b1, b2)
 
+            # 3. 6-bar logic using Kennedy's Theorem
             else:
-                # 6-bar logic using Kennedy's Theorem
-                # 1. Find IC of the primary driver loop (IC_1)
                 p_loop = self.kinematic_loop_points
-                ic_driver = self.geometry.find_intersection(
+                ic_driver = g.find_intersection(
                     sol[p_loop[0]], sol[p_loop[1]], 
                     sol[p_loop[-2]], sol[p_loop[-1]]
                 )
 
-                # 2. Find IC of the secondary loop relative to the driver (IC_2)
                 s_loop = self.secondary_loop_points
-                ic_driven = self.geometry.find_intersection(
+                ic_driven = g.find_intersection(
                     sol[s_loop[0]], sol[s_loop[1]], 
                     sol[s_loop[-2]], sol[s_loop[-1]]
                 )
 
-                # 3. The 6-bar IC is the intersection of lines through these relative centers
-                # This typically involves projecting lines from Ground nodes through relative ICs
                 ground_node = [n for n in s_loop if self.points[n].type == 'ground'][0]
-                ic_final = self.geometry.find_intersection(
+                ic_final = g.find_intersection(
                     sol[ground_node], ic_driven,
                     sol[p_loop[0]], ic_driver
                 )
@@ -398,17 +419,27 @@ class Bike():
                 Axle_Path_X = np.zeros(size)
             return Vertical_Travel,Axle_Path_X
 
-        def calculate_shock_motion(sol,size):
+        def calculate_shock_motion(sol, size):
             if self.shock is not None:
-                #Find shock point names
                 s_a_name = self.shock.a
                 s_b_name = self.shock.b
-                Shock_Length = self.calc_distance(sol[s_a_name] , sol[s_b_name])
-                Leverage_Ratio = self.calc_derivative(Vertical_Travel,Shock_Length)
+                Shock_Length = self.calc_distance(sol[s_a_name], sol[s_b_name])
+                
+                # Bulletproof dW/dS calculation using discrete differences
+                dW = np.diff(Vertical_Travel)
+                dS = np.abs(np.diff(Shock_Length))
+                
+                # Prevent divide by zero if shock doesn't move
+                dS[dS == 0] = 1e-10 
+                
+                LR_diff = dW / dS
+                # np.diff makes the array 1 item shorter, so we duplicate the last value to keep it length 100
+                Leverage_Ratio = np.append(LR_diff, LR_diff[-1]) 
+                
             else:
                 Shock_Length = np.zeros(size)
                 Leverage_Ratio = np.zeros(size)
-            return Shock_Length,Leverage_Ratio
+            return Shock_Length, Leverage_Ratio
 
         def calculate_anti_squat(sol,size):
             if len(self.chainline) > 1:
@@ -477,7 +508,7 @@ class Bike():
             return AS_Percent,Tyre_Contact,AS_P,CLINE_0,CLINE_1,IFC
 
         populate_static_points(sol,size)
-        Instant_Centre = calculate_instant_centre(sol,size)
+        Instant_Centre = calculate_instant_centre(sol)
         Vertical_Travel, Axle_Path_X = calculate_rear_wheel_motion(sol,size)
         Shock_Length,Leverage_Ratio = calculate_shock_motion(sol,size)
         AS_Percent,Tyre_Contact,AS_P,CLINE_0,CLINE_1,IFC = calculate_anti_squat(sol,size)

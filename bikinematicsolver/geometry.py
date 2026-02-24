@@ -33,20 +33,21 @@ def find_intersection(a1, a2, b1, b2):
     div = dx_a * dy_b - dy_a * dx_b
 
     # Check for parallel lines (div is near zero)
-    # We use a small epsilon to handle float precision
     is_parallel = np.abs(div) < 1e-9
 
-    # Calculate intersection using determinants
+    # THE FIX: Pad the denominator using your robust is_parallel check
+    div_safe = np.where(is_parallel, 1e-9, div)
+
+    # Calculate intersection using determinants and the safe denominator
     d_a = a1.x * a2.y - a1.y * a2.x
     d_b = b1.x * b2.y - b1.y * b2.x
     
-    x0 = (d_a * dx_b - dx_a * d_b) / div
-    y0 = (d_a * dy_b - dy_a * d_b) / div
+    x0 = (d_a * dx_b - dx_a * d_b) / div_safe
+    y0 = (d_a * dy_b - dy_a * d_b) / div_safe
 
     # If parallel, the IC is at infinity. 
     # Returning large values prevents the solver from crashing
     if np.any(is_parallel):
-        # You can handle array inputs by using np.where
         x0 = np.where(is_parallel, 1e12, x0)
         y0 = np.where(is_parallel, 1e12, y0)
 
