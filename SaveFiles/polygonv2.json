@@ -1,0 +1,187 @@
+{
+  "points": {
+    "ground2": {
+      "name": "ground2",
+      "type": "ground",
+      "pos": [
+        1076.3738707435718,
+        720.4004449388207
+      ]
+    },
+    "upper_ground": {
+      "name": "upper_ground",
+      "type": "ground",
+      "pos": [
+        1254.435719249479,
+        934.519466073415
+      ]
+    },
+    "bottom_bracket": {
+      "name": "bottom_bracket",
+      "type": "bottom_bracket",
+      "pos": [
+        1016.3530229325921,
+        572.3181312569521
+      ]
+    },
+    "ground3": {
+      "name": "ground3",
+      "type": "ground",
+      "pos": [
+        1032.358582348853,
+        678.3770856507232
+      ]
+    },
+    "ground_1": {
+      "name": "ground_1",
+      "type": "ground",
+      "pos": [
+        1074.3731758165395,
+        776.4315906562847
+      ]
+    },
+    "front_wheel": {
+      "name": "front_wheel",
+      "type": "front_wheel",
+      "pos": [
+        1890.6567060458651,
+        618.3437152391547
+      ]
+    },
+    "linkage1": {
+      "name": "linkage1",
+      "type": "linkage",
+      "pos": [
+        980.3405142460042,
+        682.3793103448274
+      ]
+    },
+    "rear_wheel": {
+      "name": "rear_wheel",
+      "type": "rear_wheel",
+      "pos": [
+        566.1966643502433,
+        612.3403781979977
+      ]
+    },
+    "linkage2": {
+      "name": "linkage2",
+      "type": "linkage",
+      "pos": [
+        1074.3731758165393,
+        680.3781979977749
+      ]
+    },
+    "ss_link2": {
+      "name": "ss_link2",
+      "type": "linkage",
+      "pos": [
+        606.2105628908965,
+        676.3759733036707
+      ]
+    },
+    "lower_shock": {
+      "name": "lower_shock",
+      "type": "linkage",
+      "pos": [
+        1068.3710910354414,
+        844.4694104560623
+      ]
+    },
+    "ss_link": {
+      "name": "ss_link",
+      "type": "linkage",
+      "pos": [
+        1006.3495482974286,
+        822.4571746384872
+      ]
+    }
+  },
+  "links": {
+    "linkage1_linkage2": {
+      "name": "linkage1_linkage2",
+      "a": "linkage1",
+      "b": "linkage2"
+    },
+    "ground2_linkage2": {
+      "name": "ground2_linkage2",
+      "a": "ground2",
+      "b": "linkage2"
+    },
+    "Shock Eye-Eye": {
+      "name": "Shock Eye-Eye",
+      "a": "lower_shock",
+      "b": "upper_ground"
+    },
+    "ground3_linkage1": {
+      "name": "ground3_linkage1",
+      "a": "ground3",
+      "b": "linkage1"
+    },
+    "ss_link2_rear_wheel": {
+      "name": "ss_link2_rear_wheel",
+      "a": "ss_link2",
+      "b": "rear_wheel"
+    },
+    "ground_1_ss_link": {
+      "name": "ground_1_ss_link",
+      "a": "ground_1",
+      "b": "ss_link"
+    },
+    "ss_link2_linkage2": {
+      "name": "ss_link2_linkage2",
+      "a": "ss_link2",
+      "b": "linkage2"
+    },
+    "linkage1_rear_wheel": {
+      "name": "linkage1_rear_wheel",
+      "a": "linkage1",
+      "b": "rear_wheel"
+    },
+    "ss_link2_lower_shock": {
+      "name": "ss_link2_lower_shock",
+      "a": "ss_link2",
+      "b": "lower_shock"
+    },
+    "ss_link2_ss_link": {
+      "name": "ss_link2_ss_link",
+      "a": "ss_link2",
+      "b": "ss_link"
+    },
+    "lower_shock_ss_link": {
+      "name": "lower_shock_ss_link",
+      "a": "lower_shock",
+      "b": "ss_link"
+    }
+  },
+  "shock": "Shock Eye-Eye",
+  "params": {
+    "wheelbase": "1234",
+    "chainring_teeth": "32",
+    "cassette_teeth": "51",
+    "wheel_size": "29",
+    "window_width": 2880,
+    "window_height": 1800,
+    "image_file": "/Users/robertkans/BiKinematics/ImageFiles/example_polygon_bromo.jpg",
+    "point_colour": [
+      1,
+      1,
+      1,
+      1
+    ],
+    "link_colour": [
+      1,
+      0,
+      0,
+      1
+    ],
+    "shock_colour": [
+      0,
+      1,
+      0,
+      1
+    ],
+    "p2mm": 0.9317004372741879,
+    "cog_height": "1100"
+  }
+}

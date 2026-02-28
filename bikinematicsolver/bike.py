@@ -207,6 +207,8 @@ class Bike():
                 print(f"Detected: 4-Bar with Shock Loop ({len(suspension_loops)} loops found)")
             else:
                 self.is_6_bar = True # It's a true high-pivot 6-bar or similar
+                print(self.kinematic_loop_points)
+                print(suspension_loops)
                 print(f"Detected: True 6-Bar ({len(suspension_loops)} loops found)")
 
         return suspension_loops
@@ -419,83 +421,175 @@ class Bike():
                 Axle_Path_X = np.zeros(size)
             return Vertical_Travel,Axle_Path_X
 
+        # def calculate_shock_motion(sol, size):
+        #     if self.shock is not None:
+        #         s_a_name = self.shock.a
+        #         s_b_name = self.shock.b
+        #         Shock_Length = self.calc_distance(sol[s_a_name], sol[s_b_name])
+                
+        #         # Bulletproof dW/dS calculation using discrete differences
+        #         dW = np.diff(Vertical_Travel)
+        #         dS = np.abs(np.diff(Shock_Length))
+                
+        #         # Prevent divide by zero if shock doesn't move
+        #         dS[dS == 0] = 1e-10 
+                
+        #         LR_diff = dW / dS
+        #         # np.diff makes the array 1 item shorter, so we duplicate the last value to keep it length 100
+        #         Leverage_Ratio = np.append(LR_diff, LR_diff[-1]) 
         def calculate_shock_motion(sol, size):
-            if self.shock is not None:
+            # 1. Custom Analytical override for the Seatstay-Driven Polygon Bromo
+            if 'ss_link2' in sol and 'ground_1' in self.points:
+                
+                # Get static geometry coordinates
+                p_ss_link2 = self.points['ss_link2'].pos
+                p_ss_link = self.points['ss_link'].pos
+                p_ground_1 = self.points['ground_1'].pos
+                p_lower_shock = self.points['lower_shock'].pos
+                
+                # Safely get upper shock mount (fallback in case named differently in JSON)
+                if 'upper_ground' in self.points:
+                    p_upper_ground = self.points['upper_ground'].pos
+                elif self.shock is not None and self.shock.a != 'lower_shock':
+                    p_upper_ground = self.points[self.shock.a].pos
+                elif self.shock is not None:
+                    p_upper_ground = self.points[self.shock.b].pos
+                else:
+                    print("Error: Could not find upper shock mount.")
+                    return np.zeros(size), np.zeros(size)
+                
+                # Physical lengths of our two rotating arms
+                L_seatstay = np.sqrt((p_ss_link[0] - p_ss_link2[0])**2 + (p_ss_link[1] - p_ss_link2[1])**2)
+                L_rocker = np.sqrt((p_ss_link[0] - p_ground_1[0])**2 + (p_ss_link[1] - p_ground_1[1])**2)
+                
+                # Arrays of our moving chainstay mount and fixed frame pivot
+                x0 = sol['ss_link2'].x
+                y0 = sol['ss_link2'].y
+                x1 = p_ground_1[0]
+                y1 = p_ground_1[1]
+                
+                # 2-Circle Intersection Math to find the moving ss_link
+                d = np.sqrt((x1 - x0)**2 + (y1 - y0)**2)
+                d = np.where(d == 0, 1e-10, d) # Prevent division by zero
+                
+                a = (L_seatstay**2 - L_rocker**2 + d**2) / (2 * d)
+                h = np.sqrt(np.maximum(L_seatstay**2 - a**2, 0)) 
+                
+                x2 = x0 + a * (x1 - x0) / d
+                y2 = y0 + a * (y1 - y0) / d
+                
+                rx1 = x2 + h * (y1 - y0) / d
+                ry1 = y2 - h * (x1 - x0) / d
+                rx2 = x2 - h * (y1 - y0) / d
+                ry2 = y2 + h * (x1 - x0) / d
+                
+                # Pick the correct intersection (the one closest to the original static ss_link)
+                d1 = (rx1 - p_ss_link[0])**2 + (ry1 - p_ss_link[1])**2
+                d2 = (rx2 - p_ss_link[0])**2 + (ry2 - p_ss_link[1])**2
+                
+                ss_link_x = np.where(d1 < d2, rx1, rx2)
+                ss_link_y = np.where(d1 < d2, ry1, ry2)
+                    
+                # Find how much the seatstay has rotated from its original static angle
+                orig_angle = np.arctan2(p_ss_link[1] - p_ss_link2[1], p_ss_link[0] - p_ss_link2[0])
+                new_angles = np.arctan2(ss_link_y - y0, ss_link_x - x0)
+                delta_angles = new_angles - orig_angle
+                
+                # The static offset of the shock mount relative to the swingarm pivot (ss_link2)
+                ls_dx = p_lower_shock[0] - p_ss_link2[0]
+                ls_dy = p_lower_shock[1] - p_ss_link2[1]
+                
+                # Rotate that offset and add it to the moving ss_link2 position
+                new_ls_x = x0 + ls_dx * np.cos(delta_angles) - ls_dy * np.sin(delta_angles)
+                new_ls_y = y0 + ls_dx * np.sin(delta_angles) + ls_dy * np.cos(delta_angles)
+                
+                # Calculate final precise shock length
+                Shock_Length = np.sqrt((new_ls_x - p_upper_ground[0])**2 + (new_ls_y - p_upper_ground[1])**2)
+                
+                # Leverage Ratio Math
+                dW = np.diff(Vertical_Travel)
+                dS = np.abs(np.diff(Shock_Length))
+                dS = np.where(dS == 0, 1e-10, dS) 
+                LR_diff = dW / dS
+                Leverage_Ratio = np.append(LR_diff, LR_diff[-1]) 
+                
+            elif self.shock is not None:
+                # Standard fallback for normal 4-bars and Single Pivots
                 s_a_name = self.shock.a
                 s_b_name = self.shock.b
                 Shock_Length = self.calc_distance(sol[s_a_name], sol[s_b_name])
                 
-                # Bulletproof dW/dS calculation using discrete differences
                 dW = np.diff(Vertical_Travel)
                 dS = np.abs(np.diff(Shock_Length))
-                
-                # Prevent divide by zero if shock doesn't move
-                dS[dS == 0] = 1e-10 
-                
+                dS = np.where(dS == 0, 1e-10, dS) 
                 LR_diff = dW / dS
-                # np.diff makes the array 1 item shorter, so we duplicate the last value to keep it length 100
                 Leverage_Ratio = np.append(LR_diff, LR_diff[-1]) 
-                
             else:
                 Shock_Length = np.zeros(size)
                 Leverage_Ratio = np.zeros(size)
+                
             return Shock_Length, Leverage_Ratio
 
         def calculate_anti_squat(sol,size):
             if len(self.chainline) > 1:
-                #input is second last entry in chainline (chainring or idler), output is last (cassette)
                 input_name = self.chainline[-2][0]
                 inp_rad = self.chainline[-2][1] * 0.5
                 output_name = self.chainline[-1][0]
                 out_rad = self.chainline[-1][1] * 0.5
 
-                #Find chainline and IFC
+                # 1. THE FIRST FIX: Calculate Tyre Contact BEFORE the loop!
+                wheel_rad = float(self.get_param('wheel_size')) * 25.4 * 0.5
+                Tyre_Contact_X = sol[self.wheels['rear']].x
+                Tyre_Contact_Y = sol[self.wheels['rear']].y - np.ones(size) * wheel_rad
+
                 IFC_x = np.zeros(size)
                 IFC_y = np.zeros(size)
                 Cline0_x = np.zeros(size)
                 Cline0_y = np.zeros(size)
                 Cline1_x = np.zeros(size)
                 Cline1_y = np.zeros(size)
-                #loop through and find:
-                # -'upper circle' intersection points for each step in solution -> these give us upper chainline
-                # -ifc: intersection of upper chainline and 'effective swingarm' line between rw and instant centre
+                
                 for i in range(size): 
-                    #grim processing, maybe need to optimize datatypes a bit. issue is with finding the 'upper' chainline -> need to see if vectorised way
-                    #of doing this
                     out_pos = Pos(sol[output_name].x[i],sol[output_name].y[i])
                     inp_pos = Pos(sol[input_name].x[i],sol[input_name].y[i])
                     IC = Pos(Instant_Centre.x[i],Instant_Centre.y[i])
-                    #find all possible lines tangent to the two circles
-                    possible_clines = g.find_common_circle_tangent(inp_pos,
-                                                            inp_rad,
-                                                            out_pos,
-                                                            out_rad)
-                    #find which is the 'upper' solution
+                    
+                    # Create a position object for the ground contact patch at this specific step
+                    tc_pos = Pos(Tyre_Contact_X[i], Tyre_Contact_Y[i])
+                    
+                    possible_clines = g.find_common_circle_tangent(inp_pos, inp_rad, out_pos, out_rad)
                     cline_pts = g.find_upper_tangent_points(possible_clines,inp_pos,out_pos)
-                    #find ifc (intersection)
-                    res = (g.find_intersection(cline_pts[0],cline_pts[1],out_pos,IC))
+                    
+                    # 2. THE SECOND FIX: The Effective Swingarm line goes from Tyre Contact to IC! Not the Axle.
+                    res = (g.find_intersection(cline_pts[0], cline_pts[1], tc_pos, IC))
                     
                     Cline0_x[i] = cline_pts[0].x; Cline0_y[i] = cline_pts[0].y
                     Cline1_x[i] = cline_pts[1].x; Cline1_y[i] = cline_pts[1].y
                     IFC_x[i] = res.x; IFC_y[i] = res.y           
 
-                #Results in expected data format
                 IFC = Pos(IFC_x,IFC_y)
                 CLINE_0 = Pos(Cline0_x,Cline0_y)
                 CLINE_1 = Pos(Cline1_x,Cline1_y)
+                Tyre_Contact = Pos(Tyre_Contact_X, Tyre_Contact_Y)
 
-                #Find tyre contact and AS line
-                wheel_rad = float(self.get_param('wheel_size')) * 25.4 * 0.5
-                Tyre_Contact = Pos(sol[self.wheels['rear']].x, sol[self.wheels['rear']].y - np.ones(size) * wheel_rad)      
                 AS_x = sol[self.wheels['front']].x
-                AS_y = np.add( Tyre_Contact.y , (np.subtract(AS_x, Tyre_Contact.x) / np.subtract(IFC.x , Tyre_Contact.x)) * np.subtract(IFC.y,Tyre_Contact.y) )
+                
+                # 3. THE THIRD FIX: Prevent Divide by Zero Singularities
+                # If the IFC is directly above the rear tire, the line is perfectly vertical.
+                denom = np.subtract(IFC.x, Tyre_Contact.x)
+                denom = np.where(denom == 0, 1e-9, denom) # Prevent math explosions
+                
+                AS_y = np.add( Tyre_Contact.y , (np.subtract(AS_x, Tyre_Contact.x) / denom) * np.subtract(IFC.y,Tyre_Contact.y) )
 
                 AS_P = Pos(AS_x,AS_y) 
 
                 ground_y = Tyre_Contact.y[0]
                 h_cog = float(self.get_param('cog_height')) * np.ones(size)
                 h_AS = AS_P.y - ground_y * np.ones(size) 
+                
+                # Calculate AS % and clip wild singularity spikes to 500% so the graph scale remains readable
                 AS_Percent = 100 * (h_AS / h_cog) 
+                AS_Percent = np.clip(AS_Percent, -200, 500)
 
             else:
                 IFC = np.zeros(size) 

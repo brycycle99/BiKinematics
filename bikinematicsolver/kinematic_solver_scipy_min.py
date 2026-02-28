@@ -162,8 +162,13 @@ class Kinematic_Solver_Scipy_Min():
                 if link.a in kin_loop_points:
                     possible_links.append(kin_loop_points.index(link.a))
                     
+        # THE FIX: Safety catch for the "Magic Gap"
+        # If a point (like the upper rocker) is totally decoupled from the main loop,
+        # anchor it statically to the frame so the array doesn't crash.
+        if not possible_links:
+            possible_links = [len(kin_loop_points) - 1]
+            
         return possible_links
-
     # def solve_kinematic_loop(self,loop_ls):
     #     """
     #     Expects (2n x 1) input vector of form v = [th1,...,th(n),L1,...,L(n)]. Typical usage is to set the input angle,
